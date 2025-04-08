@@ -386,10 +386,11 @@ def infer_process(
     max_chars = int(len(ref_text.encode("utf-8")) / (audio.shape[-1] / sr) * (22 - audio.shape[-1] / sr))
     gen_text_batches = chunk_text(gen_text, max_chars=max_chars)
     for i, gen_text in enumerate(gen_text_batches):
+        continue
         print(f"gen_text {i}", gen_text)
-    print("\n")
+    # print("\n")
 
-    show_info(f"Generating audio in {len(gen_text_batches)} batches...")
+    # show_info(f"Generating audio in {len(gen_text_batches)} batches...")
     return next(
         infer_batch_process(
             (audio, sr),
@@ -470,6 +471,8 @@ def infer_batch_process(
             duration = ref_audio_len + int(ref_audio_len / ref_text_len * gen_text_len / local_speed)
 
         # inference
+        import time
+        t1 = time.time()
         with torch.inference_mode():
             generated, _ = model_obj.sample(
                 cond=audio,
@@ -490,10 +493,10 @@ def infer_batch_process(
                 generated_wave = vocoder(generated)
             if rms < target_rms:
                 generated_wave = generated_wave * rms / target_rms
-
+            print('using', time.time()-t1,'s')
             # wav -> numpy
             generated_wave = generated_wave.squeeze().cpu().numpy()
-
+        
             if streaming:
                 for j in range(0, len(generated_wave), chunk_size):
                     yield generated_wave[j : j + chunk_size], target_sample_rate
