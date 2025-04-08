@@ -1,0 +1,12 @@
+# F5TTS_v1_Base | E2TTS_Base
+model = "F5TTS_Base"
+ref_audio = "infer/examples/basic/basic_ref_en.wav"
+# If an empty "", transcribes the reference audio automatically.
+ref_text = "Some call me nature, others call me mother nature."
+gen_text = 'Es ist mir egal, wie du mich nennst. Ich war stiller Zuschauer und habe die Entwicklung der Arten, den Aufstieg und Untergang von Imperien beobachtet. Aber vergiss nie: Ich bin mächtig und ausdauernd.'
+# File with text to generate. Ignores the text above.
+gen_file = ""
+remove_silence = false
+output_dir = "tests"
+output_file = "infer_cli_basic.wav"
+ckpt_file = "ckpts/kneron_base_de/model_420000_half.safetensors"
