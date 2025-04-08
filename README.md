@@ -18,54 +18,115 @@
 ### Thanks to all the contributors !
 
 ## News
+- **2025/03/12**: 🔥 F5-TTS v1 base model with better training and inference performance. [Few demo](https://swivid.github.io/F5-TTS_updates).
 - **2024/10/08**: F5-TTS & E2 TTS base models on [🤗 Hugging Face](https://huggingface.co/SWivid/F5-TTS), [🤖 Model Scope](https://www.modelscope.cn/models/SWivid/F5-TTS_Emilia-ZH-EN), [🟣 Wisemodel](https://wisemodel.cn/models/SJTU_X-LANCE/F5-TTS_Emilia-ZH-EN).
 
 ## Installation
+
+### Create a separate environment if needed
 
 ```bash
 # Create a python 3.10 conda env (you could also use virtualenv)
 conda create -n f5-tts python=3.10
 conda activate f5-tts
-
-# NVIDIA GPU: install pytorch with your CUDA version, e.g.
-pip install torch==2.3.0+cu118 torchaudio==2.3.0+cu118 --extra-index-url https://download.pytorch.org/whl/cu118
-
-# AMD GPU: install pytorch with your ROCm version, e.g. (Linux only)
-pip install torch==2.5.1+rocm6.2 torchaudio==2.5.1+rocm6.2 --extra-index-url https://download.pytorch.org/whl/rocm6.2
-
-# Intel GPU: install pytorch with your XPU version, e.g.
-# Intel® Deep Learning Essentials or Intel® oneAPI Base Toolkit must be installed
-pip install --pre torch torchaudio --index-url https://download.pytorch.org/whl/nightly/xpu
 ```
 
-Then you can choose from a few options below:
+### Install PyTorch with matched device
 
-### 1. As a pip package (if just for inference)
+<details>
+<summary>NVIDIA GPU</summary>
 
-```bash
-pip install git+https://github.com/SWivid/F5-TTS.git
-```
+> ```bash
+> # Install pytorch with your CUDA version, e.g.
+> pip install torch==2.4.0+cu124 torchaudio==2.4.0+cu124 --extra-index-url https://download.pytorch.org/whl/cu124
+> ```
 
-### 2. Local editable (if also do training, finetuning)
+</details>
 
-```bash
-git clone https://github.com/SWivid/F5-TTS.git
-cd F5-TTS
-# git submodule update --init --recursive  # (optional, if need bigvgan)
-pip install -e .
-```
+<details>
+<summary>AMD GPU</summary>
 
-### 3. Docker usage
+> ```bash
+> # Install pytorch with your ROCm version (Linux only), e.g.
+> pip install torch==2.5.1+rocm6.2 torchaudio==2.5.1+rocm6.2 --extra-index-url https://download.pytorch.org/whl/rocm6.2
+> ```
+
+</details>
+
+<details>
+<summary>Intel GPU</summary>
+
+> ```bash
+> # Install pytorch with your XPU version, e.g.
+> # Intel® Deep Learning Essentials or Intel® oneAPI Base Toolkit must be installed
+> pip install torch torchaudio --index-url https://download.pytorch.org/whl/test/xpu
+> 
+> # Intel GPU support is also available through IPEX (Intel® Extension for PyTorch)
+> # IPEX does not require the Intel® Deep Learning Essentials or Intel® oneAPI Base Toolkit
+> # See: https://pytorch-extension.intel.com/installation?request=platform
+> ```
+
+</details>
+
+<details>
+<summary>Apple Silicon</summary>
+
+> ```bash
+> # Install the stable pytorch, e.g.
+> pip install torch torchaudio
+> ```
+
+</details>
+
+### Then you can choose one from below:
+
+> ### 1. As a pip package (if just for inference)
+> 
+> ```bash
+> pip install f5-tts
+> ```
+> 
+> ### 2. Local editable (if also do training, finetuning)
+> 
+> ```bash
+> git clone https://github.com/SWivid/F5-TTS.git
+> cd F5-TTS
+> # git submodule update --init --recursive  # (optional, if need > bigvgan)
+> pip install -e .
+> ```
+
+### Docker usage also available
 ```bash
 # Build from Dockerfile
 docker build -t f5tts:v1 .
 
-# Or pull from GitHub Container Registry
-docker pull ghcr.io/swivid/f5-tts:main
+# Run from GitHub Container Registry
+docker container run --rm -it --gpus=all --mount 'type=volume,source=f5-tts,target=/root/.cache/huggingface/hub/' -p 7860:7860 ghcr.io/swivid/f5-tts:main
+
+# Quickstart if you want to just run the web interface (not CLI)
+docker container run --rm -it --gpus=all --mount 'type=volume,source=f5-tts,target=/root/.cache/huggingface/hub/' -p 7860:7860 ghcr.io/swivid/f5-tts:main f5-tts_infer-gradio --host 0.0.0.0
 ```
+
+### Runtime
+
+Deployment solution with Triton and TensorRT-LLM.
+
+#### Benchmark Results
+Decoding on a single L20 GPU, using 26 different prompt_audio & target_text pairs.
+
+| Model               | Concurrency    | Avg Latency | RTF    | Mode            |
+|---------------------|----------------|-------------|--------|-----------------|
+| F5-TTS Base (Vocos) | 2              | 253 ms      | 0.0394 | Client-Server   |
+| F5-TTS Base (Vocos) | 1 (Batch_size) | -           | 0.0402 | Offline TRT-LLM |
+| F5-TTS Base (Vocos) | 1 (Batch_size) | -           | 0.1467 | Offline Pytorch |
+
+See [detailed instructions](src/f5_tts/runtime/triton_trtllm/README.md) for more information.
 
 
 ## Inference
+
+- In order to achieve desired performance, take a moment to read [detailed guidance](src/f5_tts/infer).
+- By properly searching the keywords of problem encountered, [issues](https://github.com/SWivid/F5-TTS/issues?q=is%3Aissue) are very helpful.
 
 ### 1. Gradio App
 
@@ -87,14 +148,40 @@ f5-tts_infer-gradio --port 7860 --host 0.0.0.0
 f5-tts_infer-gradio --share
 ```
 
+<details>
+<summary>NVIDIA device docker compose file example</summary>
+
+```yaml
+services:
+  f5-tts:
+    image: ghcr.io/swivid/f5-tts:main
+    ports:
+      - "7860:7860"
+    environment:
+      GRADIO_SERVER_PORT: 7860
+    entrypoint: ["f5-tts_infer-gradio", "--port", "7860", "--host", "0.0.0.0"]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+volumes:
+  f5-tts:
+    driver: local
+```
+
+</details>
+
 ### 2. CLI Inference
 
 ```bash
 # Run with flags
 # Leave --ref_text "" will have ASR model transcribe (extra GPU memory usage)
-f5-tts_infer-cli \
---model "F5-TTS" \
---ref_audio "ref_audio.wav" \
+f5-tts_infer-cli --model F5TTS_v1_Base \
+--ref_audio "provide_prompt_wav_path_here.wav" \
 --ref_text "The content, subtitle or transcription of reference audio." \
 --gen_text "Some text you want TTS model generate for you."
 
@@ -107,22 +194,21 @@ f5-tts_infer-cli -c custom.toml
 f5-tts_infer-cli -c src/f5_tts/infer/examples/multi/story.toml
 ```
 
-### 3. More instructions
-
-- In order to have better generation results, take a moment to read [detailed guidance](src/f5_tts/infer).
-- The [Issues](https://github.com/SWivid/F5-TTS/issues?q=is%3Aissue) are very useful, please try to find the solution by properly searching the keywords of problem encountered. If no answer found, then feel free to open an issue.
-
 
 ## Training
 
-### 1. Gradio App
+### 1. With Hugging Face Accelerate
 
-Read [training & finetuning guidance](src/f5_tts/train) for more instructions.
+Refer to [training & finetuning guidance](src/f5_tts/train) for best practice.
+
+### 2. With Gradio App
 
 ```bash
 # Quick start with Gradio web interface
 f5-tts_finetune-gradio
 ```
+
+Read [training & finetuning guidance](src/f5_tts/train) for more instructions.
 
 
 ## [Evaluation](src/f5_tts/eval)
@@ -130,7 +216,7 @@ f5-tts_finetune-gradio
 
 ## Development
 
-Use pre-commit to ensure code quality (will run linters and formatters automatically)
+Use pre-commit to ensure code quality (will run linters and formatters automatically):
 
 ```bash
 pip install pre-commit
@@ -143,7 +229,7 @@ When making a pull request, before each commit, run:
 pre-commit run --all-files
 ```
 
-Note: Some model components have linting exceptions for E722 to accommodate tensor notation
+Note: Some model components have linting exceptions for E722 to accommodate tensor notation.
 
 
 ## Acknowledgements
@@ -158,6 +244,7 @@ Note: Some model components have linting exceptions for E722 to accommodate tens
 - [mrfakename](https://x.com/realmrfakename) huggingface space demo ~
 - [f5-tts-mlx](https://github.com/lucasnewman/f5-tts-mlx/tree/main) Implementation with MLX framework by [Lucas Newman](https://github.com/lucasnewman)
 - [F5-TTS-ONNX](https://github.com/DakeQQ/F5-TTS-ONNX) ONNX Runtime version by [DakeQQ](https://github.com/DakeQQ)
+- [Yuekai Zhang](https://github.com/yuekaizhang) Triton and TensorRT-LLM support ~
 
 ## Citation
 If our work and codebase is useful for you, please cite as:

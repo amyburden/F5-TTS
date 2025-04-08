@@ -16,7 +16,7 @@
 <!-- omit in toc -->
 ### Supported Languages
 - [Multilingual](#multilingual)
-    - [F5-TTS Base @ zh \& en @ F5-TTS](#f5-tts-base--zh--en--f5-tts)
+    - [F5-TTS v1 v0 Base @ zh \& en @ F5-TTS](#f5-tts-v1-v0-base--zh--en--f5-tts)
 - [English](#english)
 - [Finnish](#finnish)
     - [F5-TTS Base @ fi @ AsmoKoskinen](#f5-tts-base--fi--asmokoskinen)
@@ -37,7 +37,18 @@
 
 ## Multilingual
 
-#### F5-TTS Base @ zh & en @ F5-TTS
+#### F5-TTS v1 v0 Base @ zh & en @ F5-TTS
+|Model|🤗Hugging Face|Data (Hours)|Model License|
+|:---:|:------------:|:-----------:|:-------------:|
+|F5-TTS v1 Base|[ckpt & vocab](https://huggingface.co/SWivid/F5-TTS/tree/main/F5TTS_v1_Base)|[Emilia 95K zh&en](https://huggingface.co/datasets/amphion/Emilia-Dataset/tree/fc71e07)|cc-by-nc-4.0|
+
+```bash
+Model: hf://SWivid/F5-TTS/F5TTS_v1_Base/model_1250000.safetensors
+# A Variant Model: hf://SWivid/F5-TTS/F5TTS_v1_Base_no_zero_init/model_1250000.safetensors
+Vocab: hf://SWivid/F5-TTS/F5TTS_v1_Base/vocab.txt
+Config: {"dim": 1024, "depth": 22, "heads": 16, "ff_mult": 2, "text_dim": 512, "conv_layers": 4}
+```
+
 |Model|🤗Hugging Face|Data (Hours)|Model License|
 |:---:|:------------:|:-----------:|:-------------:|
 |F5-TTS Base|[ckpt & vocab](https://huggingface.co/SWivid/F5-TTS/tree/main/F5TTS_Base)|[Emilia 95K zh&en](https://huggingface.co/datasets/amphion/Emilia-Dataset/tree/fc71e07)|cc-by-nc-4.0|
@@ -45,7 +56,7 @@
 ```bash
 Model: hf://SWivid/F5-TTS/F5TTS_Base/model_1200000.safetensors
 Vocab: hf://SWivid/F5-TTS/F5TTS_Base/vocab.txt
-Config: {"dim": 1024, "depth": 22, "heads": 16, "ff_mult": 2, "text_dim": 512, "conv_layers": 4}
+Config: {"dim": 1024, "depth": 22, "heads": 16, "ff_mult": 2, "text_dim": 512, "text_mask_padding": False, "conv_layers": 4, "pe_attn_head": 1}
 ```
 
 *Other infos, e.g. Author info, Github repo, Link to some sampled results, Usage instruction, Tutorial (Blog, Video, etc.) ...*
@@ -64,7 +75,7 @@ Config: {"dim": 1024, "depth": 22, "heads": 16, "ff_mult": 2, "text_dim": 512, "
 ```bash
 Model: hf://AsmoKoskinen/F5-TTS_Finnish_Model/model_common_voice_fi_vox_populi_fi_20241206.safetensors
 Vocab: hf://AsmoKoskinen/F5-TTS_Finnish_Model/vocab.txt
-Config: {"dim": 1024, "depth": 22, "heads": 16, "ff_mult": 2, "text_dim": 512, "conv_layers": 4}
+Config: {"dim": 1024, "depth": 22, "heads": 16, "ff_mult": 2, "text_dim": 512, "text_mask_padding": False, "conv_layers": 4, "pe_attn_head": 1}
 ```
 
 
@@ -78,7 +89,7 @@ Config: {"dim": 1024, "depth": 22, "heads": 16, "ff_mult": 2, "text_dim": 512, "
 ```bash
 Model: hf://RASPIAUDIO/F5-French-MixedSpeakers-reduced/model_last_reduced.pt
 Vocab: hf://RASPIAUDIO/F5-French-MixedSpeakers-reduced/vocab.txt
-Config: {"dim": 1024, "depth": 22, "heads": 16, "ff_mult": 2, "text_dim": 512, "conv_layers": 4}
+Config: {"dim": 1024, "depth": 22, "heads": 16, "ff_mult": 2, "text_dim": 512, "text_mask_padding": False, "conv_layers": 4, "pe_attn_head": 1}
 ```
 
 - [Online Inference with Hugging Face Space](https://huggingface.co/spaces/RASPIAUDIO/f5-tts_french).
@@ -96,7 +107,7 @@ Config: {"dim": 1024, "depth": 22, "heads": 16, "ff_mult": 2, "text_dim": 512, "
 ```bash
 Model: hf://SPRINGLab/F5-Hindi-24KHz/model_2500000.safetensors
 Vocab: hf://SPRINGLab/F5-Hindi-24KHz/vocab.txt
-Config: {"dim": 768, "depth": 18, "heads": 12, "ff_mult": 2, "text_dim": 512, "conv_layers": 4}
+Config: {"dim": 768, "depth": 18, "heads": 12, "ff_mult": 2, "text_dim": 512, "text_mask_padding": False, "conv_layers": 4, "pe_attn_head": 1}
 ```
 
 - Authors: SPRING Lab, Indian Institute of Technology, Madras
@@ -113,7 +124,7 @@ Config: {"dim": 768, "depth": 18, "heads": 12, "ff_mult": 2, "text_dim": 512, "c
 ```bash
 Model: hf://alien79/F5-TTS-italian/model_159600.safetensors
 Vocab: hf://alien79/F5-TTS-italian/vocab.txt
-Config: {"dim": 1024, "depth": 22, "heads": 16, "ff_mult": 2, "text_dim": 512, "conv_layers": 4}
+Config: {"dim": 1024, "depth": 22, "heads": 16, "ff_mult": 2, "text_dim": 512, "text_mask_padding": False, "conv_layers": 4, "pe_attn_head": 1}
 ```
 
 - Trained by [Mithril Man](https://github.com/MithrilMan)
@@ -126,12 +137,12 @@ Config: {"dim": 1024, "depth": 22, "heads": 16, "ff_mult": 2, "text_dim": 512, "
 #### F5-TTS Base @ ja @ Jmica
 |Model|🤗Hugging Face|Data (Hours)|Model License|
 |:---:|:------------:|:-----------:|:-------------:|
-|F5-TTS Base|[ckpt & vocab](https://huggingface.co/Jmica/F5TTS/tree/main/JA_25498980)|[Emilia 1.7k JA](https://huggingface.co/datasets/amphion/Emilia-Dataset/tree/fc71e07) & [Galgame Dataset 5.4k](https://huggingface.co/datasets/OOPPEENN/Galgame_Dataset)|cc-by-nc-4.0|
+|F5-TTS Base|[ckpt & vocab](https://huggingface.co/Jmica/F5TTS/tree/main/JA_21999120)|[Emilia 1.7k JA](https://huggingface.co/datasets/amphion/Emilia-Dataset/tree/fc71e07) & [Galgame Dataset 5.4k](https://huggingface.co/datasets/OOPPEENN/Galgame_Dataset)|cc-by-nc-4.0|
 
 ```bash
-Model: hf://Jmica/F5TTS/JA_25498980/model_25498980.pt
-Vocab: hf://Jmica/F5TTS/JA_25498980/vocab_updated.txt
-Config: {"dim": 1024, "depth": 22, "heads": 16, "ff_mult": 2, "text_dim": 512, "conv_layers": 4}
+Model: hf://Jmica/F5TTS/JA_21999120/model_21999120.pt
+Vocab: hf://Jmica/F5TTS/JA_21999120/vocab_japanese.txt
+Config: {"dim": 1024, "depth": 22, "heads": 16, "ff_mult": 2, "text_dim": 512, "text_mask_padding": False, "conv_layers": 4, "pe_attn_head": 1}
 ```
 
 
@@ -148,7 +159,7 @@ Config: {"dim": 1024, "depth": 22, "heads": 16, "ff_mult": 2, "text_dim": 512, "
 ```bash
 Model: hf://hotstone228/F5-TTS-Russian/model_last.safetensors
 Vocab: hf://hotstone228/F5-TTS-Russian/vocab.txt
-Config: {"dim": 1024, "depth": 22, "heads": 16, "ff_mult": 2, "text_dim": 512, "conv_layers": 4}
+Config: {"dim": 1024, "depth": 22, "heads": 16, "ff_mult": 2, "text_dim": 512, "text_mask_padding": False, "conv_layers": 4, "pe_attn_head": 1}
 ```
 - Finetuned by [HotDro4illa](https://github.com/HotDro4illa)
 - Any improvements are welcome

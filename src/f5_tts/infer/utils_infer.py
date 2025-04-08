@@ -2,8 +2,9 @@
 # Make adjustments inside functions, and consider both gradio and cli scripts if need to change func output format
 import os
 import sys
+from concurrent.futures import ThreadPoolExecutor
 
-os.environ["PYTOCH_ENABLE_MPS_FALLBACK"] = "1"  # for MPS device compatibility
+os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"  # for MPS device compatibility
 sys.path.append(f"{os.path.dirname(os.path.abspath(__file__))}/../../third_party/BigVGAN/")
 
 import hashlib
@@ -20,7 +21,7 @@ import numpy as np
 import torch
 import torchaudio
 import tqdm
-from huggingface_hub import snapshot_download, hf_hub_download
+from huggingface_hub import hf_hub_download
 from pydub import AudioSegment, silence
 from transformers import pipeline
 from vocos import Vocos
@@ -127,11 +128,12 @@ def load_vocoder(vocoder_name="vocos", is_local=False, local_path="", device=dev
         except ImportError:
             print("You need to follow the README to init submodule and change the BigVGAN source code.")
         if is_local:
-            """download from https://huggingface.co/nvidia/bigvgan_v2_24khz_100band_256x/tree/main"""
+            # download generator from https://huggingface.co/nvidia/bigvgan_v2_24khz_100band_256x/tree/main
             vocoder = bigvgan.BigVGAN.from_pretrained(local_path, use_cuda_kernel=False)
         else:
-            local_path = snapshot_download(repo_id="nvidia/bigvgan_v2_24khz_100band_256x", cache_dir=hf_cache_dir)
-            vocoder = bigvgan.BigVGAN.from_pretrained(local_path, use_cuda_kernel=False)
+            vocoder = bigvgan.BigVGAN.from_pretrained(
+                "nvidia/bigvgan_v2_24khz_100band_256x", use_cuda_kernel=False, cache_dir=hf_cache_dir
+            )
 
         vocoder.remove_weight_norm()
         vocoder = vocoder.eval().to(device)
@@ -148,7 +150,7 @@ def initialize_asr_pipeline(device: str = device, dtype=None):
         dtype = (
             torch.float16
             if "cuda" in device
-            and torch.cuda.get_device_properties(device).major >= 6
+            and torch.cuda.get_device_properties(device).major >= 7
             and not torch.cuda.get_device_name().endswith("[ZLUDA]")
             else torch.float32
         )
@@ -185,7 +187,7 @@ def load_checkpoint(model, ckpt_path, device: str, dtype=None, use_ema=True):
         dtype = (
             torch.float16
             if "cuda" in device
-            and torch.cuda.get_device_properties(device).major >= 6
+            and torch.cuda.get_device_properties(device).major >= 7
             and not torch.cuda.get_device_name().endswith("[ZLUDA]")
             else torch.float32
         )
@@ -288,7 +290,7 @@ def remove_silence_edges(audio, silence_threshold=-42):
 # preprocess reference audio and text
 
 
-def preprocess_ref_audio_text(ref_audio_orig, ref_text, clip_short=True, show_info=print, device=device):
+def preprocess_ref_audio_text(ref_audio_orig, ref_text, clip_short=True, show_info=print):
     show_info("Converting audio...")
     with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as f:
         aseg = AudioSegment.from_file(ref_audio_orig)
@@ -300,29 +302,29 @@ def preprocess_ref_audio_text(ref_audio_orig, ref_text, clip_short=True, show_in
             )
             non_silent_wave = AudioSegment.silent(duration=0)
             for non_silent_seg in non_silent_segs:
-                if len(non_silent_wave) > 6000 and len(non_silent_wave + non_silent_seg) > 15000:
-                    show_info("Audio is over 15s, clipping short. (1)")
+                if len(non_silent_wave) > 6000 and len(non_silent_wave + non_silent_seg) > 12000:
+                    show_info("Audio is over 12s, clipping short. (1)")
                     break
                 non_silent_wave += non_silent_seg
 
             # 2. try to find short silence for clipping if 1. failed
-            if len(non_silent_wave) > 15000:
+            if len(non_silent_wave) > 12000:
                 non_silent_segs = silence.split_on_silence(
                     aseg, min_silence_len=100, silence_thresh=-40, keep_silence=1000, seek_step=10
                 )
                 non_silent_wave = AudioSegment.silent(duration=0)
                 for non_silent_seg in non_silent_segs:
-                    if len(non_silent_wave) > 6000 and len(non_silent_wave + non_silent_seg) > 15000:
-                        show_info("Audio is over 15s, clipping short. (2)")
+                    if len(non_silent_wave) > 6000 and len(non_silent_wave + non_silent_seg) > 12000:
+                        show_info("Audio is over 12s, clipping short. (2)")
                         break
                     non_silent_wave += non_silent_seg
 
             aseg = non_silent_wave
 
             # 3. if no proper silence found for clipping
-            if len(aseg) > 15000:
-                aseg = aseg[:15000]
-                show_info("Audio is over 15s, clipping short. (3)")
+            if len(aseg) > 12000:
+                aseg = aseg[:12000]
+                show_info("Audio is over 12s, clipping short. (3)")
 
         aseg = remove_silence_edges(aseg) + AudioSegment.silent(duration=50)
         aseg.export(f.name, format="wav")
@@ -382,29 +384,31 @@ def infer_process(
 ):
     # Split the input text into batches
     audio, sr = torchaudio.load(ref_audio)
-    max_chars = int(len(ref_text.encode("utf-8")) / (audio.shape[-1] / sr) * (25 - audio.shape[-1] / sr))
+    max_chars = int(len(ref_text.encode("utf-8")) / (audio.shape[-1] / sr) * (22 - audio.shape[-1] / sr))
     gen_text_batches = chunk_text(gen_text, max_chars=max_chars)
     for i, gen_text in enumerate(gen_text_batches):
         print(f"gen_text {i}", gen_text)
     print("\n")
 
     show_info(f"Generating audio in {len(gen_text_batches)} batches...")
-    return infer_batch_process(
-        (audio, sr),
-        ref_text,
-        gen_text_batches,
-        model_obj,
-        vocoder,
-        mel_spec_type=mel_spec_type,
-        progress=progress,
-        target_rms=target_rms,
-        cross_fade_duration=cross_fade_duration,
-        nfe_step=nfe_step,
-        cfg_strength=cfg_strength,
-        sway_sampling_coef=sway_sampling_coef,
-        speed=speed,
-        fix_duration=fix_duration,
-        device=device,
+    return next(
+        infer_batch_process(
+            (audio, sr),
+            ref_text,
+            gen_text_batches,
+            model_obj,
+            vocoder,
+            mel_spec_type=mel_spec_type,
+            progress=progress,
+            target_rms=target_rms,
+            cross_fade_duration=cross_fade_duration,
+            nfe_step=nfe_step,
+            cfg_strength=cfg_strength,
+            sway_sampling_coef=sway_sampling_coef,
+            speed=speed,
+            fix_duration=fix_duration,
+            device=device,
+        )
     )
 
 
@@ -427,6 +431,8 @@ def infer_batch_process(
     speed=1,
     fix_duration=None,
     device=None,
+    streaming=False,
+    chunk_size=2048,
 ):
     audio, sr = ref_audio
     if audio.shape[0] > 1:
@@ -445,7 +451,12 @@ def infer_batch_process(
 
     if len(ref_text[-1].encode("utf-8")) == 1:
         ref_text = ref_text + " "
-    for i, gen_text in enumerate(progress.tqdm(gen_text_batches)):
+
+    def process_batch(gen_text):
+        local_speed = speed
+        if len(gen_text.encode("utf-8")) < 10:
+            local_speed = 0.3
+
         # Prepare the text
         text_list = [ref_text + gen_text]
         final_text_list = convert_char_to_pinyin(text_list)
@@ -457,7 +468,7 @@ def infer_batch_process(
             # Calculate duration
             ref_text_len = len(ref_text.encode("utf-8"))
             gen_text_len = len(gen_text.encode("utf-8"))
-            duration = ref_audio_len + int(ref_audio_len / ref_text_len * gen_text_len / speed)
+            duration = ref_audio_len + int(ref_audio_len / ref_text_len * gen_text_len / local_speed)
 
         # inference
         with torch.inference_mode():
@@ -469,64 +480,88 @@ def infer_batch_process(
                 cfg_strength=cfg_strength,
                 sway_sampling_coef=sway_sampling_coef,
             )
+            del _
 
-            generated = generated.to(torch.float32)
+            generated = generated.to(torch.float32)  # generated mel spectrogram
             generated = generated[:, ref_audio_len:, :]
-            generated_mel_spec = generated.permute(0, 2, 1)
+            generated = generated.permute(0, 2, 1)
             if mel_spec_type == "vocos":
-                generated_wave = vocoder.decode(generated_mel_spec)
+                generated_wave = vocoder.decode(generated)
             elif mel_spec_type == "bigvgan":
-                generated_wave = vocoder(generated_mel_spec)
+                generated_wave = vocoder(generated)
             if rms < target_rms:
                 generated_wave = generated_wave * rms / target_rms
 
             # wav -> numpy
             generated_wave = generated_wave.squeeze().cpu().numpy()
 
-            generated_waves.append(generated_wave)
-            spectrograms.append(generated_mel_spec[0].cpu().numpy())
+            if streaming:
+                for j in range(0, len(generated_wave), chunk_size):
+                    yield generated_wave[j : j + chunk_size], target_sample_rate
+            else:
+                generated_cpu = generated[0].cpu().numpy()
+                del generated
+                yield generated_wave, generated_cpu
 
-    # Combine all generated waves with cross-fading
-    if cross_fade_duration <= 0:
-        # Simply concatenate
-        final_wave = np.concatenate(generated_waves)
+    if streaming:
+        for gen_text in progress.tqdm(gen_text_batches) if progress is not None else gen_text_batches:
+            for chunk in process_batch(gen_text):
+                yield chunk
     else:
-        final_wave = generated_waves[0]
-        for i in range(1, len(generated_waves)):
-            prev_wave = final_wave
-            next_wave = generated_waves[i]
+        with ThreadPoolExecutor() as executor:
+            futures = [executor.submit(process_batch, gen_text) for gen_text in gen_text_batches]
+            for future in progress.tqdm(futures) if progress is not None else futures:
+                result = future.result()
+                if result:
+                    generated_wave, generated_mel_spec = next(result)
+                    generated_waves.append(generated_wave)
+                    spectrograms.append(generated_mel_spec)
 
-            # Calculate cross-fade samples, ensuring it does not exceed wave lengths
-            cross_fade_samples = int(cross_fade_duration * target_sample_rate)
-            cross_fade_samples = min(cross_fade_samples, len(prev_wave), len(next_wave))
+        if generated_waves:
+            if cross_fade_duration <= 0:
+                # Simply concatenate
+                final_wave = np.concatenate(generated_waves)
+            else:
+                # Combine all generated waves with cross-fading
+                final_wave = generated_waves[0]
+                for i in range(1, len(generated_waves)):
+                    prev_wave = final_wave
+                    next_wave = generated_waves[i]
 
-            if cross_fade_samples <= 0:
-                # No overlap possible, concatenate
-                final_wave = np.concatenate([prev_wave, next_wave])
-                continue
+                    # Calculate cross-fade samples, ensuring it does not exceed wave lengths
+                    cross_fade_samples = int(cross_fade_duration * target_sample_rate)
+                    cross_fade_samples = min(cross_fade_samples, len(prev_wave), len(next_wave))
 
-            # Overlapping parts
-            prev_overlap = prev_wave[-cross_fade_samples:]
-            next_overlap = next_wave[:cross_fade_samples]
+                    if cross_fade_samples <= 0:
+                        # No overlap possible, concatenate
+                        final_wave = np.concatenate([prev_wave, next_wave])
+                        continue
 
-            # Fade out and fade in
-            fade_out = np.linspace(1, 0, cross_fade_samples)
-            fade_in = np.linspace(0, 1, cross_fade_samples)
+                    # Overlapping parts
+                    prev_overlap = prev_wave[-cross_fade_samples:]
+                    next_overlap = next_wave[:cross_fade_samples]
 
-            # Cross-faded overlap
-            cross_faded_overlap = prev_overlap * fade_out + next_overlap * fade_in
+                    # Fade out and fade in
+                    fade_out = np.linspace(1, 0, cross_fade_samples)
+                    fade_in = np.linspace(0, 1, cross_fade_samples)
 
-            # Combine
-            new_wave = np.concatenate(
-                [prev_wave[:-cross_fade_samples], cross_faded_overlap, next_wave[cross_fade_samples:]]
-            )
+                    # Cross-faded overlap
+                    cross_faded_overlap = prev_overlap * fade_out + next_overlap * fade_in
 
-            final_wave = new_wave
+                    # Combine
+                    new_wave = np.concatenate(
+                        [prev_wave[:-cross_fade_samples], cross_faded_overlap, next_wave[cross_fade_samples:]]
+                    )
 
-    # Create a combined spectrogram
-    combined_spectrogram = np.concatenate(spectrograms, axis=1)
+                    final_wave = new_wave
 
-    return final_wave, target_sample_rate, combined_spectrogram
+            # Create a combined spectrogram
+            combined_spectrogram = np.concatenate(spectrograms, axis=1)
+
+            yield final_wave, target_sample_rate, combined_spectrogram
+
+        else:
+            yield None, target_sample_rate, None
 
 
 # remove silence from generated wav

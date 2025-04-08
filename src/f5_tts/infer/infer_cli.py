@@ -10,6 +10,7 @@ import numpy as np
 import soundfile as sf
 import tomli
 from cached_path import cached_path
+from hydra.utils import get_class
 from omegaconf import OmegaConf
 
 from f5_tts.infer.utils_infer import (
@@ -21,13 +22,13 @@ from f5_tts.infer.utils_infer import (
     sway_sampling_coef,
     speed,
     fix_duration,
+    device,
     infer_process,
     load_model,
     load_vocoder,
     preprocess_ref_audio_text,
     remove_silence_for_generated_wav,
 )
-from f5_tts.model import DiT, UNetT
 
 
 parser = argparse.ArgumentParser(
@@ -50,7 +51,7 @@ parser.add_argument(
     "-m",
     "--model",
     type=str,
-    help="The model name: F5-TTS | E2-TTS",
+    help="The model name: F5TTS_v1_Base | F5TTS_Base | E2TTS_Base | etc.",
 )
 parser.add_argument(
     "-mc",
@@ -162,6 +163,11 @@ parser.add_argument(
     type=float,
     help=f"Fix the total duration (ref and gen audios) in seconds, default {fix_duration}",
 )
+parser.add_argument(
+    "--device",
+    type=str,
+    help="Specify the device to run on",
+)
 args = parser.parse_args()
 
 
@@ -172,8 +178,7 @@ config = tomli.load(open(args.config, "rb"))
 
 # command-line interface parameters
 
-model = args.model or config.get("model", "F5-TTS")
-model_cfg = args.model_cfg or config.get("model_cfg", str(files("f5_tts").joinpath("configs/F5TTS_Base_train.yaml")))
+model = args.model or config.get("model", "F5TTS_v1_Base")
 ckpt_file = args.ckpt_file or config.get("ckpt_file", "")
 vocab_file = args.vocab_file or config.get("vocab_file", "")
 
@@ -203,6 +208,7 @@ cfg_strength = args.cfg_strength or config.get("cfg_strength", cfg_strength)
 sway_sampling_coef = args.sway_sampling_coef or config.get("sway_sampling_coef", sway_sampling_coef)
 speed = args.speed or config.get("speed", speed)
 fix_duration = args.fix_duration or config.get("fix_duration", fix_duration)
+device = args.device or config.get("device", device)
 
 
 # patches for pip pkg user
@@ -240,41 +246,42 @@ if vocoder_name == "vocos":
 elif vocoder_name == "bigvgan":
     vocoder_local_path = "../checkpoints/bigvgan_v2_24khz_100band_256x"
 
-vocoder = load_vocoder(vocoder_name=vocoder_name, is_local=load_vocoder_from_local, local_path=vocoder_local_path)
+vocoder = load_vocoder(
+    vocoder_name=vocoder_name, is_local=load_vocoder_from_local, local_path=vocoder_local_path, device=device
+)
 
 
 # load TTS model
 
-if model == "F5-TTS":
-    model_cls = DiT
-    model_cfg = OmegaConf.load(model_cfg).model.arch
-    if not ckpt_file:  # path not specified, download from repo
-        if vocoder_name == "vocos":
-            repo_name = "F5-TTS"
-            exp_name = "F5TTS_Base"
-            ckpt_step = 1200000
-            ckpt_file = str(cached_path(f"hf://SWivid/{repo_name}/{exp_name}/model_{ckpt_step}.safetensors"))
-            # ckpt_file = f"ckpts/{exp_name}/model_{ckpt_step}.pt"  # .pt | .safetensors; local path
-        elif vocoder_name == "bigvgan":
-            repo_name = "F5-TTS"
-            exp_name = "F5TTS_Base_bigvgan"
-            ckpt_step = 1250000
-            ckpt_file = str(cached_path(f"hf://SWivid/{repo_name}/{exp_name}/model_{ckpt_step}.pt"))
+model_cfg = OmegaConf.load(
+    args.model_cfg or config.get("model_cfg", str(files("f5_tts").joinpath(f"configs/{model}.yaml")))
+)
+model_cls = get_class(f"f5_tts.model.{model_cfg.model.backbone}")
+model_arc = model_cfg.model.arch
 
-elif model == "E2-TTS":
-    assert args.model_cfg is None, "E2-TTS does not support custom model_cfg yet"
-    assert vocoder_name == "vocos", "E2-TTS only supports vocoder vocos yet"
-    model_cls = UNetT
-    model_cfg = dict(dim=1024, depth=24, heads=16, ff_mult=4)
-    if not ckpt_file:  # path not specified, download from repo
-        repo_name = "E2-TTS"
-        exp_name = "E2TTS_Base"
+repo_name, ckpt_step, ckpt_type = "F5-TTS", 1250000, "safetensors"
+
+if model != "F5TTS_Base":
+    assert vocoder_name == model_cfg.model.mel_spec.mel_spec_type
+
+# override for previous models
+if model == "F5TTS_Base":
+    if vocoder_name == "vocos":
         ckpt_step = 1200000
-        ckpt_file = str(cached_path(f"hf://SWivid/{repo_name}/{exp_name}/model_{ckpt_step}.safetensors"))
-        # ckpt_file = f"ckpts/{exp_name}/model_{ckpt_step}.pt"  # .pt | .safetensors; local path
+    elif vocoder_name == "bigvgan":
+        model = "F5TTS_Base_bigvgan"
+        ckpt_type = "pt"
+elif model == "E2TTS_Base":
+    repo_name = "E2-TTS"
+    ckpt_step = 1200000
+
+if not ckpt_file:
+    ckpt_file = str(cached_path(f"hf://SWivid/{repo_name}/{model}/model_{ckpt_step}.{ckpt_type}"))
 
 print(f"Using {model}...")
-ema_model = load_model(model_cls, model_cfg, ckpt_file, mel_spec_type=vocoder_name, vocab_file=vocab_file)
+ema_model = load_model(
+    model_cls, model_arc, ckpt_file, mel_spec_type=vocoder_name, vocab_file=vocab_file, device=device
+)
 
 
 # inference process
@@ -330,6 +337,7 @@ def main():
             sway_sampling_coef=sway_sampling_coef,
             speed=speed,
             fix_duration=fix_duration,
+            device=device,
         )
         generated_audio_segments.append(audio_segment)
 
@@ -337,7 +345,7 @@ def main():
             if len(gen_text_) > 200:
                 gen_text_ = gen_text_[:200] + " ... "
             sf.write(
-                os.path.join(output_chunk_dir, f"{len(generated_audio_segments)-1}_{gen_text_}.wav"),
+                os.path.join(output_chunk_dir, f"{len(generated_audio_segments) - 1}_{gen_text_}.wav"),
                 audio_segment,
                 final_sample_rate,
             )

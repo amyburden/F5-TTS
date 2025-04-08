@@ -1,6 +1,7 @@
 # ruff: noqa: E402
 # Above allows ruff to ignore E402: module level import not at top of file
 
+import gc
 import json
 import re
 import tempfile
@@ -11,6 +12,7 @@ import click
 import gradio as gr
 import numpy as np
 import soundfile as sf
+import torch
 import torchaudio
 from cached_path import cached_path
 from transformers import AutoModelForCausalLM, AutoTokenizer
@@ -41,12 +43,12 @@ from f5_tts.infer.utils_infer import (
 )
 
 
-DEFAULT_TTS_MODEL = "F5-TTS"
+DEFAULT_TTS_MODEL = "F5-TTS_v1"
 tts_model_choice = DEFAULT_TTS_MODEL
 
 DEFAULT_TTS_MODEL_CFG = [
-    "hf://SWivid/F5-TTS/F5TTS_Base/model_1200000.safetensors",
-    "hf://SWivid/F5-TTS/F5TTS_Base/vocab.txt",
+    "hf://SWivid/F5-TTS/F5TTS_v1_Base/model_1250000.safetensors",
+    "hf://SWivid/F5-TTS/F5TTS_v1_Base/vocab.txt",
     json.dumps(dict(dim=1024, depth=22, heads=16, ff_mult=2, text_dim=512, conv_layers=4)),
 ]
 
@@ -56,13 +58,15 @@ DEFAULT_TTS_MODEL_CFG = [
 vocoder = load_vocoder()
 
 
-def load_f5tts(ckpt_path=str(cached_path("hf://SWivid/F5-TTS/F5TTS_Base/model_1200000.safetensors"))):
-    F5TTS_model_cfg = dict(dim=1024, depth=22, heads=16, ff_mult=2, text_dim=512, conv_layers=4)
+def load_f5tts():
+    ckpt_path = str(cached_path(DEFAULT_TTS_MODEL_CFG[0]))
+    F5TTS_model_cfg = json.loads(DEFAULT_TTS_MODEL_CFG[2])
     return load_model(DiT, F5TTS_model_cfg, ckpt_path)
 
 
-def load_e2tts(ckpt_path=str(cached_path("hf://SWivid/E2-TTS/E2TTS_Base/model_1200000.safetensors"))):
-    E2TTS_model_cfg = dict(dim=1024, depth=24, heads=16, ff_mult=4)
+def load_e2tts():
+    ckpt_path = str(cached_path("hf://SWivid/E2-TTS/E2TTS_Base/model_1200000.safetensors"))
+    E2TTS_model_cfg = dict(dim=1024, depth=24, heads=16, ff_mult=4, text_mask_padding=False, pe_attn_head=1)
     return load_model(UNetT, E2TTS_model_cfg, ckpt_path)
 
 
@@ -73,7 +77,7 @@ def load_custom(ckpt_path: str, vocab_path="", model_cfg=None):
     if vocab_path.startswith("hf://"):
         vocab_path = str(cached_path(vocab_path))
     if model_cfg is None:
-        model_cfg = dict(dim=1024, depth=22, heads=16, ff_mult=2, text_dim=512, conv_layers=4)
+        model_cfg = json.loads(DEFAULT_TTS_MODEL_CFG[2])
     return load_model(DiT, model_cfg, ckpt_path, vocab_file=vocab_path)
 
 
@@ -130,7 +134,7 @@ def infer(
 
     ref_audio, ref_text = preprocess_ref_audio_text(ref_audio_orig, ref_text, show_info=show_info)
 
-    if model == "F5-TTS":
+    if model == DEFAULT_TTS_MODEL:
         ema_model = F5TTS_ema_model
     elif model == "E2-TTS":
         global E2TTS_ema_model
@@ -548,35 +552,50 @@ Have a conversation with an AI using your reference voice!
 """
     )
 
-    if not USING_SPACES:
-        load_chat_model_btn = gr.Button("Load Chat Model", variant="primary")
+    chat_model_name_list = [
+        "Qwen/Qwen2.5-3B-Instruct",
+        "microsoft/Phi-4-mini-instruct",
+    ]
 
-        chat_interface_container = gr.Column(visible=False)
+    @gpu_decorator
+    def load_chat_model(chat_model_name):
+        show_info = gr.Info
+        global chat_model_state, chat_tokenizer_state
+        if chat_model_state is not None:
+            chat_model_state = None
+            chat_tokenizer_state = None
+            gc.collect()
+            torch.cuda.empty_cache()
 
-        @gpu_decorator
-        def load_chat_model():
-            global chat_model_state, chat_tokenizer_state
-            if chat_model_state is None:
-                show_info = gr.Info
-                show_info("Loading chat model...")
-                model_name = "Qwen/Qwen2.5-3B-Instruct"
-                chat_model_state = AutoModelForCausalLM.from_pretrained(
-                    model_name, torch_dtype="auto", device_map="auto"
-                )
-                chat_tokenizer_state = AutoTokenizer.from_pretrained(model_name)
-                show_info("Chat model loaded.")
+        show_info(f"Loading chat model: {chat_model_name}")
+        chat_model_state = AutoModelForCausalLM.from_pretrained(chat_model_name, torch_dtype="auto", device_map="auto")
+        chat_tokenizer_state = AutoTokenizer.from_pretrained(chat_model_name)
+        show_info(f"Chat model {chat_model_name} loaded successfully!")
 
-            return gr.update(visible=False), gr.update(visible=True)
+        return gr.update(visible=False), gr.update(visible=True)
 
-        load_chat_model_btn.click(load_chat_model, outputs=[load_chat_model_btn, chat_interface_container])
+    if USING_SPACES:
+        load_chat_model(chat_model_name_list[0])
 
-    else:
-        chat_interface_container = gr.Column()
+    chat_model_name_input = gr.Dropdown(
+        choices=chat_model_name_list,
+        value=chat_model_name_list[0],
+        label="Chat Model Name",
+        info="Enter the name of a HuggingFace chat model",
+        allow_custom_value=not USING_SPACES,
+    )
+    load_chat_model_btn = gr.Button("Load Chat Model", variant="primary", visible=not USING_SPACES)
+    chat_interface_container = gr.Column(visible=USING_SPACES)
 
-        if chat_model_state is None:
-            model_name = "Qwen/Qwen2.5-3B-Instruct"
-            chat_model_state = AutoModelForCausalLM.from_pretrained(model_name, torch_dtype="auto", device_map="auto")
-            chat_tokenizer_state = AutoTokenizer.from_pretrained(model_name)
+    chat_model_name_input.change(
+        lambda: gr.update(visible=True),
+        None,
+        load_chat_model_btn,
+        show_progress="hidden",
+    )
+    load_chat_model_btn.click(
+        load_chat_model, inputs=[chat_model_name_input], outputs=[load_chat_model_btn, chat_interface_container]
+    )
 
     with chat_interface_container:
         with gr.Row():
@@ -746,23 +765,23 @@ Have a conversation with an AI using your reference voice!
 
 with gr.Blocks() as app:
     gr.Markdown(
-        """
+        f"""
 # E2/F5 TTS
 
-This is a local web UI for F5 TTS with advanced batch processing support. This app supports the following TTS models:
+This is {"a local web UI for [F5 TTS](https://github.com/SWivid/F5-TTS)" if not USING_SPACES else "an online demo for [F5-TTS](https://github.com/SWivid/F5-TTS)"} with advanced batch processing support. This app supports the following TTS models:
 
 * [F5-TTS](https://arxiv.org/abs/2410.06885) (A Fairytaler that Fakes Fluent and Faithful Speech with Flow Matching)
 * [E2 TTS](https://arxiv.org/abs/2406.18009) (Embarrassingly Easy Fully Non-Autoregressive Zero-Shot TTS)
 
 The checkpoints currently support English and Chinese.
 
-If you're having issues, try converting your reference audio to WAV or MP3, clipping it to 15s with  ✂  in the bottom right corner (otherwise might have non-optimal auto-trimmed result).
+If you're having issues, try converting your reference audio to WAV or MP3, clipping it to 12s with  ✂  in the bottom right corner (otherwise might have non-optimal auto-trimmed result).
 
-**NOTE: Reference text will be automatically transcribed with Whisper if not provided. For best results, keep your reference clips short (<15s). Ensure the audio is fully uploaded before generating.**
+**NOTE: Reference text will be automatically transcribed with Whisper if not provided. For best results, keep your reference clips short (<12s). Ensure the audio is fully uploaded before generating.**
 """
     )
 
-    last_used_custom = files("f5_tts").joinpath("infer/.cache/last_used_custom_model_info.txt")
+    last_used_custom = files("f5_tts").joinpath("infer/.cache/last_used_custom_model_info_v1.txt")
 
     def load_last_used_custom():
         try:
@@ -821,7 +840,30 @@ If you're having issues, try converting your reference audio to WAV or MP3, clip
         custom_model_cfg = gr.Dropdown(
             choices=[
                 DEFAULT_TTS_MODEL_CFG[2],
-                json.dumps(dict(dim=768, depth=18, heads=12, ff_mult=2, text_dim=512, conv_layers=4)),
+                json.dumps(
+                    dict(
+                        dim=1024,
+                        depth=22,
+                        heads=16,
+                        ff_mult=2,
+                        text_dim=512,
+                        text_mask_padding=False,
+                        conv_layers=4,
+                        pe_attn_head=1,
+                    )
+                ),
+                json.dumps(
+                    dict(
+                        dim=768,
+                        depth=18,
+                        heads=12,
+                        ff_mult=2,
+                        text_dim=512,
+                        text_mask_padding=False,
+                        conv_layers=4,
+                        pe_attn_head=1,
+                    )
+                ),
             ],
             value=load_last_used_custom()[2],
             allow_custom_value=True,
@@ -875,10 +917,24 @@ If you're having issues, try converting your reference audio to WAV or MP3, clip
     type=str,
     help='The root path (or "mount point") of the application, if it\'s not served from the root ("/") of the domain. Often used when the application is behind a reverse proxy that forwards requests to the application, e.g. set "/myapp" or full URL for application served at "https://example.com/myapp".',
 )
-def main(port, host, share, api, root_path):
+@click.option(
+    "--inbrowser",
+    "-i",
+    is_flag=True,
+    default=False,
+    help="Automatically launch the interface in the default web browser",
+)
+def main(port, host, share, api, root_path, inbrowser):
     global app
     print("Starting app...")
-    app.queue(api_open=api).launch(server_name=host, server_port=port, share=share, show_api=api, root_path=root_path)
+    app.queue(api_open=api).launch(
+        server_name=host,
+        server_port=port,
+        share=share,
+        show_api=api,
+        root_path=root_path,
+        inbrowser=inbrowser,
+    )
 
 
 if __name__ == "__main__":
