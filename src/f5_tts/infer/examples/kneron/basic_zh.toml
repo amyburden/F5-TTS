@@ -1,0 +1,13 @@
+# F5TTS_v1_Base | E2TTS_Base
+model = "F5TTS_Base"
+ref_audio = "infer/examples/basic/linzhiling_2s.wav"
+# If an empty "", transcribes the reference audio automatically.
+ref_text = "成长的速度非常的惊人."
+gen_text = "收到好友从远方寄来的生日礼物，那份意外的惊喜与深深的祝福让我心中充满了甜蜜的快乐，笑容如花儿般绽放。"
+# File with text to generate. Ignores the text above.
+gen_file = ""
+remove_silence = false
+output_dir = "tests"
+output_file = "infer_cli_basic.wav"
+ckpt_file = "ckpts/kneron_base_enzh/model_1200000_half.safetensors"
+
